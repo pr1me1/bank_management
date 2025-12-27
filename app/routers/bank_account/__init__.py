@@ -1,0 +1,1 @@
+from .bank_account_endpoints import router as bank_account_router

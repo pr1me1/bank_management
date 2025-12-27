@@ -1,0 +1,41 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+python << PYEND
+import sys
+import psycopg2
+import os
+import time
+
+max_attempts = 30
+for attempt in range(max_attempts):
+    try:
+        print(f"Attempt {attempt + 1}/{max_attempts}: Connecting to PostgreSQL...")
+        conn = psycopg2.connect(
+            dbname=os.getenv('POSTGRES_DB'),
+            user=os.getenv('POSTGRES_USER'),
+            password=os.getenv('POSTGRES_PASSWORD'),
+            host=os.getenv('POSTGRES_HOST', 'postgres'),
+            port=int(os.getenv('POSTGRES_PORT', '5432')),
+        )
+        conn.close()
+        print('PostgreSQL is available!')
+        sys.exit(0)
+    except psycopg2.OperationalError as e:
+        print(f"Connection failed: {e}")
+        if attempt < max_attempts - 1:
+            time.sleep(2)
+        else:
+            print('PostgreSQL connection failed after all attempts')
+            sys.exit(1)
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        sys.exit(1)
+PYEND
+
+>&2 echo 'PostgreSQL is available'
+
+exec "$@"

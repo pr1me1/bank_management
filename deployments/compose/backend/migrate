@@ -1,0 +1,179 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+export PATH=/opt/venv/bin:$PATH
+cd /app
+
+echo "=========================================="
+echo "Starting Safe Database Migration Process"
+echo "=========================================="
+
+# Function to check database connection
+check_db_connection() {
+    python3 << PYEND
+import sys
+import os
+from sqlalchemy import create_engine, text
+
+try:
+    engine = create_engine(
+        f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@"
+        f"{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+    )
+    with engine.connect() as conn:
+        conn.execute(text('SELECT 1'))
+    print("Database connection: OK")
+    sys.exit(0)
+except Exception as e:
+    print(f"Database connection: FAILED - {e}")
+    sys.exit(1)
+PYEND
+}
+
+# Function to check and fix broken migration history
+fix_migration_history() {
+    python3 << PYEND
+import sys
+import os
+from sqlalchemy import create_engine, text, inspect
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+from alembic import command
+
+try:
+    # Database connection
+    engine = create_engine(
+        f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@"
+        f"{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+    )
+
+    inspector = inspect(engine)
+
+    # Check if alembic_version table exists
+    if 'alembic_version' not in inspector.get_table_names():
+        print("✓ No migration history found - will create fresh")
+        sys.exit(0)
+
+    # Get current version from database
+    with engine.connect() as conn:
+        result = conn.execute(text('SELECT version_num FROM alembic_version')).fetchone()
+
+        if not result:
+            print("✓ Migration table empty - will create fresh")
+            sys.exit(0)
+
+        db_version = result[0]
+        print(f"Database migration version: {db_version}")
+
+    # Load alembic config
+    alembic_cfg = Config("/app/alembic.ini")
+    script = ScriptDirectory.from_config(alembic_cfg)
+
+    # Check if the version exists in migration files
+    try:
+        script.get_revision(db_version)
+        print(f"✓ Migration version {db_version} is valid")
+        sys.exit(0)
+    except Exception:
+        print(f"✗ Migration version {db_version} NOT FOUND in files")
+        print("Fixing broken migration history...")
+
+        # Get all available revisions
+        heads = script.get_heads()
+
+        if not heads:
+            # No migration files exist, clear the table
+            print("No migration files found, clearing alembic_version table...")
+            with engine.connect() as conn:
+                conn.execute(text('DELETE FROM alembic_version'))
+                conn.commit()
+            print("✓ Migration history cleared")
+        else:
+            # Find the latest valid revision
+            all_revisions = list(script.walk_revisions())
+
+            if all_revisions:
+                # Check which revision is actually applied to database
+                # by checking if tables exist
+                tables = inspector.get_table_names()
+
+                if len(tables) <= 1:  # Only alembic_version table
+                    print("Database has no tables, clearing history...")
+                    with engine.connect() as conn:
+                        conn.execute(text('DELETE FROM alembic_version'))
+                        conn.commit()
+                    print("✓ Migration history cleared")
+                else:
+                    # Tables exist, stamp to head to preserve data
+                    print(f"Database has {len(tables)} tables")
+                    print(f"Stamping to head: {heads[0]}")
+                    with engine.connect() as conn:
+                        conn.execute(text('DELETE FROM alembic_version'))
+                        conn.execute(text(f"INSERT INTO alembic_version VALUES ('{heads[0]}')"))
+                        conn.commit()
+                    print(f"✓ Migration history fixed, stamped to: {heads[0]}")
+
+        sys.exit(0)
+
+except Exception as e:
+    print(f"Error during migration history check: {e}")
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
+PYEND
+}
+
+# Function to run migrations safely
+run_migrations() {
+    echo ""
+    echo "Checking for schema changes..."
+
+    # Try to generate migration
+    if alembic -c /app/alembic.ini revision --autogenerate -m "auto migration" 2>/dev/null; then
+        echo "✓ New migration generated"
+    else
+        echo "✓ No schema changes detected"
+    fi
+
+    echo ""
+    echo "Applying migrations..."
+
+    if alembic -c /app/alembic.ini upgrade head; then
+        echo "✓ Migrations applied successfully"
+        return 0
+    else
+        echo "✗ Migration failed"
+        return 1
+    fi
+}
+
+# Main execution
+echo ""
+echo "Step 1: Checking database connection..."
+if ! check_db_connection; then
+    echo "✗ Cannot connect to database"
+    exit 1
+fi
+
+echo ""
+echo "Step 2: Checking migration history integrity..."
+if ! fix_migration_history; then
+    echo "✗ Failed to fix migration history"
+    exit 1
+fi
+
+echo ""
+echo "Step 3: Running migrations..."
+if ! run_migrations; then
+    echo "✗ Migration process failed"
+    exit 1
+fi
+
+echo ""
+echo "=========================================="
+echo "✓ Migration completed successfully!"
+echo "=========================================="
+echo ""

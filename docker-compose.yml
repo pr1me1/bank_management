@@ -1,0 +1,157 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deployments/compose/backend/Dockerfile
+      network: host
+    container_name: grossbook
+    command: /start
+    env_file:
+      - .env
+    restart: always
+    volumes:
+      - ./app:/app/app
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+      - /app/.venv
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend_network
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+
+  postgres:
+    image: postgres:16
+    container_name: postgres_db
+    env_file:
+      - .env
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_network
+
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_db
+    restart: always
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend_network
+
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: deployments/compose/backend/Dockerfile
+      network: host
+    command: /start-celeryworker
+    env_file:
+      - .env
+    restart: always
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend_network
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: deployments/compose/backend/Dockerfile
+      network: host
+    command: /start-celerybeat
+    env_file:
+      - .env
+    restart: always
+    volumes:
+      - ./app:/app/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - backend_network
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  celery_flower:
+    build:
+      context: .
+      dockerfile: deployments/compose/backend/Dockerfile
+      network: host
+    command: /start-flower
+    env_file:
+      - .env
+    restart: always
+    volumes:
+      - ./app:/app/app
+    ports:
+      - "5555:5555"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend_network
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+volumes:
+  pg_data:
+    driver: local
+
+  redis_data:
+    driver: local
+
+
+networks:
+  backend_network:
+    driver: bridge

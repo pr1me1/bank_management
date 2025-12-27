@@ -1,0 +1,55 @@
+#!/bin/bash
+
+set -o errexit
+set -o pipefail
+set -o nounset
+
+export PATH=/opt/venv/bin:$PATH
+cd /app
+
+echo "=========================================="
+echo "Starting Application"
+echo "=========================================="
+
+# Run migrations with retry logic
+MAX_MIGRATION_ATTEMPTS=3
+MIGRATION_ATTEMPT=1
+
+while [ $MIGRATION_ATTEMPT -le $MAX_MIGRATION_ATTEMPTS ]; do
+    echo ""
+    echo "Migration attempt $MIGRATION_ATTEMPT/$MAX_MIGRATION_ATTEMPTS..."
+
+    if /migrate; then
+        echo "✓ Migration successful"
+        break
+    else
+        echo "✗ Migration attempt $MIGRATION_ATTEMPT failed"
+
+        if [ $MIGRATION_ATTEMPT -eq $MAX_MIGRATION_ATTEMPTS ]; then
+            echo ""
+            echo "⚠ WARNING: Migration failed after $MAX_MIGRATION_ATTEMPTS attempts"
+            echo "⚠ Starting application anyway (existing schema will be used)"
+            echo ""
+        else
+            echo "Retrying in 5 seconds..."
+            sleep 5
+        fi
+
+        MIGRATION_ATTEMPT=$((MIGRATION_ATTEMPT + 1))
+    fi
+done
+
+echo ""
+echo "=========================================="
+echo "Starting Uvicorn Server"
+echo "=========================================="
+echo ""
+
+# Start the application
+exec uvicorn app.main:app \
+    --proxy-headers \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --reload \
+    --reload-dir /app/app \
+    --log-level info

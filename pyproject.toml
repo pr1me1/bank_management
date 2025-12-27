@@ -1,0 +1,47 @@
+[project]
+name = "gross"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+
+dependencies = [
+    "aiogram>=3.23.0",
+    "alembic>=1.17.2",
+    "argon2-cffi>=25.1.0",
+    "beautifulsoup4>=4.14.3",
+    "celery>=5.6.0",
+    "celery-types>=0.23.0",
+    "click>=8.3.1",
+    "dateparser>=1.2.2",
+    "fastapi[standard]>=0.124.0",
+    "flower>=2.0.1",
+    "groq>=0.37.1",
+    "httpx>=0.28.1",
+    "openpyxl>=3.1.5",
+    "passlib>=1.7.4",
+    "pillow>=12.0.0",
+    "playwright>=1.57.0",
+    "pre-commit>=4.5.0",
+    "psycopg2-binary>=2.9.11",
+    "pypdf2>=3.0.1",
+    "python-dotenv>=1.2.1",
+    "python-jose>=3.5.0",
+    "redis>=7.1.0",
+    "reportlab>=4.4.7",
+    "requests>=2.32.5",
+    "slowapi>=0.1.9",
+    "sqladmin[full]>=0.22.0",
+    "sqlalchemy>=2.0.45",
+    "structlog>=25.5.0",
+]
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+manage = "management.commands.create_user:cli"
+
+[tool.setuptools]
+packages = ["app", "management"]
